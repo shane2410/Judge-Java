@@ -1,0 +1,11 @@
+com\app\entity\Problem.class
+com\app\ui\MainApp.class
+com\app\entity\CodeSubmission.class
+com\app\Launcher.class
+com\app\entity\EvaluationResult.class
+com\app\executor\CodeExecutionService.class
+com\app\service\AiService.class
+com\app\dao\ProblemDAO.class
+com\app\dao\TestCaseDAO.class
+com\app\entity\TestCase.class
+com\app\db\DatabaseConnection.class
