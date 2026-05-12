@@ -4,6 +4,7 @@
 *.ctxt
 .mtj.tmp/
 *.jar
+!VietOCR3/**/*.jar
 *.war
 *.nar
 *.ear
