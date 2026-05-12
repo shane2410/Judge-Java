@@ -15,13 +15,10 @@ import okhttp3.Response;
 
 public class AiService {
     
-    // ĐỌC API KEY TỪ BIẾN MÔI TRƯỜNG
-    // Set biến môi trường trong cài đặt nâng cao
-    private static final String API_KEY = System.getenv("GEMINI_API_KEY");
-    // Hardcode
-    // private static final String API_KEY = "YOUR_GEMINI_API_KEY";
+    // private static final String API_KEY = "AIzaSyBZcpMJ-Pn08vP5Z0iLyBUE-5OxhoEeVZY";
+    private static final String API_KEY = System.getenv("GEMINI_API_KEY") != null ? System.getenv("GEMINI_API_KEY") : "AIzaSyBZcpMJ-Pn08vP5Z0iLyBUE-5OxhoEeVZY"; // Fallback cho mục đích dev
 
-    private static final String API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent";
+    private static final String API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
     private final OkHttpClient client;
     private final Gson gson;
 
@@ -112,7 +109,70 @@ public class AiService {
      * 1. Xử lý ảnh đề bài thành text (OCR / Vision)
      */
     public String extractTextFromImage(String base64Image) throws Exception {
-        return "Nội dung trích xuất từ ảnh (Mock) -> Đòi hỏi build request body chứa inline_data của Gemini.";
+        if (API_KEY == null || API_KEY.isEmpty()) {
+            throw new Exception("LỖI: Chưa thiết lập GEMINI_API_KEY trong máy.");
+        }
+
+        // 1. system_instruction (cho Gemini)
+        JsonObject systemInstruction = new JsonObject();
+        JsonObject systemParts = new JsonObject();
+        systemParts.addProperty("text", "Bạn là một công cụ OCR. Nhiệm vụ của bạn là trích xuất toàn bộ văn bản có trong ảnh một cách chính xác nhất. Đừng giải thích gì thêm, chỉ trả về văn bản trích xuất được.");
+        systemInstruction.add("parts", systemParts);
+
+        // 2. contents (ảnh)
+        JsonObject userContent = new JsonObject();
+        userContent.addProperty("role", "user");
+        JsonArray userPartsArray = new JsonArray();
+        JsonObject inlineDataObj = new JsonObject();
+        JsonObject inlineData = new JsonObject();
+        inlineData.addProperty("mime_type", "image/png"); // Mặc định PNG, có thể dùng cho JPEG
+        inlineData.addProperty("data", base64Image);
+        inlineDataObj.add("inline_data", inlineData);
+        userPartsArray.add(inlineDataObj);
+        userContent.add("parts", userPartsArray);
+
+        JsonArray contents = new JsonArray();
+        contents.add(userContent);
+
+        // 3. generationConfig
+        JsonObject generationConfig = new JsonObject();
+        generationConfig.addProperty("temperature", 0.0);
+
+        // Đóng gói request body cho Gemini API
+        JsonObject requestBodyJson = new JsonObject();
+        requestBodyJson.add("system_instruction", systemInstruction);
+        requestBodyJson.add("contents", contents);
+        requestBodyJson.add("generationConfig", generationConfig);
+
+        RequestBody body = RequestBody.create(
+                requestBodyJson.toString(),
+                MediaType.get("application/json; charset=utf-8")
+        );
+
+        String urlWithKey = API_URL + "?key=" + API_KEY;
+
+        Request request = new Request.Builder()
+                .url(urlWithKey)
+                .header("Content-Type", "application/json")
+                .post(body)
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                throw new Exception("LỖI HTTP " + response.code() + ": " + response.message());
+            }
+            String responseData = response.body().string();
+            JsonObject jsonObject = JsonParser.parseString(responseData).getAsJsonObject();
+            
+            return jsonObject.getAsJsonArray("candidates")
+                    .get(0).getAsJsonObject()
+                    .getAsJsonObject("content")
+                    .getAsJsonArray("parts")
+                    .get(0).getAsJsonObject()
+                    .get("text").getAsString();
+        } catch (java.net.UnknownHostException e) {
+             throw new Exception("LỖI MẠNG: Không thể kết nối tới Google Gemini API (Kiểm tra mạng hoặc DNS/VPN).");
+        }
     }
 
     /**

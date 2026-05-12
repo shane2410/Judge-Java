@@ -1,12 +1,20 @@
 package com.app.ui;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import com.app.dao.CodeSubmissionDAO;
+import com.app.dao.EvaluationResultDAO;
 import com.app.dao.ProblemDAO;
 import com.app.dao.TestCaseDAO;
+import com.app.entity.CodeSubmission;
+import com.app.entity.EvaluationResult;
 import com.app.entity.Problem;
 import com.app.entity.TestCase;
-import com.app.entity.EvaluationResult;
 import com.app.executor.CodeExecutionService;
 import com.app.service.AiService;
+import com.app.service.DeepSeekService;
+import com.app.service.LocalOcrService;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -17,12 +25,16 @@ import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
-import javafx.scene.control.*;
-import javafx.scene.layout.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
-
-import java.util.ArrayList;
-import java.util.List;
 
 public class MainApp extends Application {
 
@@ -32,20 +44,27 @@ public class MainApp extends Application {
     private ComboBox<String> langCombo;
     private TextArea consoleArea;
 
-    private AiService aiService;
+    // --- Kiến Trúc Hybrid AI ---
+    private LocalOcrService ocrService; // Dùng VietOCR3 (Offline) chuyên để đọc ảnh OCR
+    private DeepSeekService aiService;  // Dùng DeepSeek chuyên cho Logic & Code
     private CodeExecutionService executionService;
     private ProblemDAO problemDAO;
     private TestCaseDAO testCaseDAO;
+    private CodeSubmissionDAO codeSubmissionDAO;
+    private EvaluationResultDAO evaluationResultDAO;
 
     private Problem currentProblem;
 
     @Override
     public void start(Stage primaryStage) {
         // Init Services
-        aiService = new AiService();
+        ocrService = new LocalOcrService(); // Khởi tạo VietOCR3 Offline
+        aiService = new DeepSeekService();  // Khởi tạo DeepSeek (Logic)
         executionService = new CodeExecutionService();
         problemDAO = new ProblemDAO();
         testCaseDAO = new TestCaseDAO();
+        codeSubmissionDAO = new CodeSubmissionDAO();
+        evaluationResultDAO = new EvaluationResultDAO();
 
         primaryStage.setTitle("JudgeAI - AI Assisted Programming Judge System");
 
@@ -60,7 +79,7 @@ public class MainApp extends Application {
         problemArea.setWrapText(true);
         problemArea.setPrefRowCount(15);
         Button btnUploadImg = new Button("📸 Upload Ảnh (OCR)");
-        btnUploadImg.setOnAction(e -> log("Tính năng Vision OCR: Cần đường dẫn file thực tế..."));
+        btnUploadImg.setOnAction(e -> handleUploadImage(primaryStage));
 
         Button btnGenTest = new Button("🤖 Phân tích & Sinh Testcase");
         btnGenTest.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
@@ -211,9 +230,21 @@ public class MainApp extends Application {
 
         log("\n--- BẮT ĐẦU CHẠY CHẤM ĐIỂM (EVALUATION) ---");
         new Thread(() -> {
+            // Lưu CodeSubmission vào DB
+            CodeSubmission submission = new CodeSubmission();
+            submission.setProblemId(currentProblem.getId());
+            submission.setSourceCode(code);
+            submission.setLanguage(lang);
+            int subId = codeSubmissionDAO.addSubmission(submission);
+            submission.setId(subId);
+
             for (TestCase tc : testCases) {
                 // Evaluation Process giới hạn 2000 ms (2 giây) TLE
                 EvaluationResult res = executionService.evaluateSubmission(code, lang, tc, 2000);
+                res.setSubmissionId(subId);
+                
+                // Lưu Result vào DB
+                evaluationResultDAO.addResult(res);
                 
                 Platform.runLater(() -> {
                     String msg = String.format("TC #%d -> [Status: %s] | Thời gian: %d ms | Lỗi nếu có: %s",
@@ -225,6 +256,41 @@ public class MainApp extends Application {
             }
             Platform.runLater(() -> log("--- HOÀN THÀNH CHẤM BÀI ---"));
         }).start();
+    }
+
+    private void handleUploadImage(Stage stage) {
+        javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
+        fileChooser.setTitle("Chọn ảnh đề bài");
+        fileChooser.getExtensionFilters().addAll(
+                new javafx.stage.FileChooser.ExtensionFilter("Image Files", "*.png", "*.jpg", "*.jpeg")
+        );
+        java.io.File selectedFile = fileChooser.showOpenDialog(stage);
+        if (selectedFile != null) {
+            log("Đang phân tích ảnh: " + selectedFile.getName() + " ...");
+            new Thread(() -> {
+                try {
+                    // 1. Quét OCR Offline bằng VietOCR3
+                    String noisyText = ocrService.extractTextFromFile(selectedFile);
+                    
+                    if (noisyText == null || noisyText.trim().isEmpty()) {
+                        Platform.runLater(() -> log("Cảnh báo: VietOCR3 không tìm thấy chữ nào."));
+                        return;
+                    }
+
+                    Platform.runLater(() -> log("Đang dùng DeepSeek để sửa lỗi font và định dạng..."));
+                    
+                    // 2. Dùng DeepSeek để "mông má" lại văn bản cho đẹp
+                    String cleanText = aiService.refineOcrText(noisyText);
+
+                    Platform.runLater(() -> {
+                        problemArea.setText(cleanText);
+                        log("Đã trích xuất và tinh chỉnh văn bản thành công!");
+                    });
+                } catch (Exception ex) {
+                    Platform.runLater(() -> log("Lỗi OCR (VietOCR3): " + ex.getMessage()));
+                }
+            }).start();
+        }
     }
 
     private void log(String msg) {

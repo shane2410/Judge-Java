@@ -48,8 +48,12 @@ public class CodeExecutionService {
             } else if (language.equalsIgnoreCase("CPP")) {
                 File sourceFile = new File(runDir, "Solution.cpp");
                 Files.writeString(sourceFile.toPath(), sourceCode);
-                // Dùng gcc biên dịch
-                compiled = compileCode("g++ -O2 Solution.cpp -o Solution", runDir, result);
+                
+                // Lấy đường dẫn tuyệt đối của thư mục include để g++ tìm thấy stdbit.h
+                String includePath = new File("code/include").getAbsolutePath();
+                
+                // Dùng gcc biên dịch với c++17 và include custom headers
+                compiled = compileCode("g++ -O2 Solution.cpp -o Solution -I" + includePath, runDir, result);
                 
                 // Ở Windows thường là Solution.exe, Unix là Solution
                 String os = System.getProperty("os.name").toLowerCase();
@@ -87,8 +91,8 @@ public class CodeExecutionService {
         pb.directory(runDir);
         Process process = pb.start();
         
-        // Timeout cho việc compile (Giới hạn 10 giây để tránh treo Compile)
-        boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+        // Timeout cho việc compile (Tăng lên 30 giây cho Windows/MinGW)
+        boolean finished = process.waitFor(30, TimeUnit.SECONDS);
         
         if (!finished) {
             process.destroyForcibly();
