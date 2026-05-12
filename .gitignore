@@ -59,3 +59,5 @@ Solution.exe
 Thumbs.db
 Desktop.ini
 .DS_Store
+.agents/
+skills-lock.json

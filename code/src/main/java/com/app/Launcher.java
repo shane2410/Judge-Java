@@ -1,6 +1,5 @@
 package com.app;
 
-import com.app.ui.MainApp;
 
 /**
  * Launcher Class nhằm vượt rào cản Module System của Java 11+
@@ -9,6 +8,7 @@ import com.app.ui.MainApp;
  */
 public class Launcher {
     public static void main(String[] args) {
-        MainApp.main(args);
+        com.app.ui.MainApp.main(args);
     }
+
 }

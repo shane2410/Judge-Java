@@ -65,6 +65,8 @@ public class MainApp extends Application {
     private TableView<EvaluationResult> historyResultTable;
 
     private Problem currentProblem;
+    private TabPane tabPane;
+    private Tab judgeTab;
 
     @Override
     public void start(Stage primaryStage) {
@@ -79,10 +81,10 @@ public class MainApp extends Application {
 
         primaryStage.setTitle("JudgeAI - AI Assisted Programming Judge System");
 
-        TabPane tabPane = new TabPane();
+        tabPane = new TabPane();
 
         // --- TAB 1: Judge (original layout) ---
-        Tab judgeTab = new Tab("Judge");
+        judgeTab = new Tab("Judge");
         judgeTab.setClosable(false);
         judgeTab.setContent(buildJudgePanel(primaryStage));
 
@@ -200,7 +202,10 @@ public class MainApp extends Application {
         Button btnDeleteProblem = new Button("Delete Selected Problem");
         btnDeleteProblem.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
         btnDeleteProblem.setOnAction(e -> handleDeleteSelected());
-        toolbar.getChildren().addAll(btnRefresh, btnDeleteProblem);
+        Button btnLoadToJudge = new Button("🚀 Load to Judge");
+        btnLoadToJudge.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
+        btnLoadToJudge.setOnAction(e -> handleLoadProblemToJudge());
+        toolbar.getChildren().addAll(btnRefresh, btnDeleteProblem, btnLoadToJudge);
         root.setTop(toolbar);
 
         // --- LEFT: Problems table ---
@@ -363,6 +368,46 @@ public class MainApp extends Application {
         refreshHistoryData();
     }
 
+    private void handleLoadProblemToJudge() {
+        Problem selected = historyProblemTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            log("Vui lòng chọn một Problem từ bảng để nạp sang trang Judge.");
+            return;
+        }
+
+        // 1. Chuyển sang Tab Judge
+        tabPane.getSelectionModel().select(judgeTab);
+
+        // 2. Set current problem và text đề bài
+        currentProblem = selected;
+        problemArea.setText(selected.getDescription() != null ? selected.getDescription() : "");
+
+        // 3. Lấy testcases và code submissions ngầm định (tránh lag giao diện)
+        new Thread(() -> {
+            List<TestCase> tcs = testCaseDAO.getTestCasesByProblemId(selected.getId());
+            List<CodeSubmission> subs = codeSubmissionDAO.getSubmissionsByProblemId(selected.getId());
+            
+            Platform.runLater(() -> {
+                // Đổ dữ liệu TestCases
+                testCaseTable.getItems().clear();
+                testCaseTable.getItems().addAll(tcs);
+                
+                // Đổ dữ liệu Code Submission mới nhất
+                if (subs != null && !subs.isEmpty()) {
+                    CodeSubmission latestSub = subs.get(subs.size() - 1);
+                    codeArea.setText(latestSub.getSourceCode() != null ? latestSub.getSourceCode() : "");
+                    if (latestSub.getLanguage() != null) {
+                        langCombo.setValue(latestSub.getLanguage());
+                    }
+                } else {
+                    codeArea.clear(); // Xóa code cũ nếu bài này chưa từng nộp
+                }
+                
+                log("Đã nạp bài tập (ID=" + selected.getId() + ") sang trang Judge thành công!");
+            });
+        }).start();
+    }
+
     private void handleGenerateTestCases() {
         String probText = problemArea.getText().trim();
         if (probText.isEmpty()) {
@@ -447,21 +492,17 @@ public class MainApp extends Application {
 
         log("\n--- BẮT ĐẦU CHẠY CHẤM ĐIỂM (EVALUATION) ---");
         new Thread(() -> {
-            // Lưu CodeSubmission vào DB
-            CodeSubmission submission = new CodeSubmission();
-            submission.setProblemId(currentProblem.getId());
-            submission.setSourceCode(code);
-            submission.setLanguage(lang);
-            int subId = codeSubmissionDAO.addSubmission(submission);
-            submission.setId(subId);
+            List<EvaluationResult> tempResults = new ArrayList<>();
+            boolean allPassed = true;
 
             for (TestCase tc : testCases) {
                 // Evaluation Process giới hạn 2000 ms (2 giây) TLE
                 EvaluationResult res = executionService.evaluateSubmission(code, lang, tc, 2000);
-                res.setSubmissionId(subId);
+                tempResults.add(res);
                 
-                // Lưu Result vào DB
-                evaluationResultDAO.addResult(res);
+                if (!"AC".equals(res.getStatus())) {
+                    allPassed = false;
+                }
                 
                 Platform.runLater(() -> {
                     String msg = String.format("TC #%d -> [Status: %s] | Thời gian: %d ms | Lỗi nếu có: %s",
@@ -471,7 +512,25 @@ public class MainApp extends Application {
                     log(msg);
                 });
             }
-            Platform.runLater(() -> log("--- HOÀN THÀNH CHẤM BÀI ---"));
+
+            // Chỉ lưu lại Solution (CodeSubmission) nếu tất cả các testcase đều Pass (AC)
+            if (allPassed) {
+                CodeSubmission submission = new CodeSubmission();
+                submission.setProblemId(currentProblem.getId());
+                submission.setSourceCode(code);
+                submission.setLanguage(lang);
+                submission.setExpectedVerdict("AC");
+                int subId = codeSubmissionDAO.addSubmission(submission);
+                
+                for (EvaluationResult res : tempResults) {
+                    res.setSubmissionId(subId);
+                    evaluationResultDAO.addResult(res);
+                }
+                
+                Platform.runLater(() -> log("--- Giải thuật chính xác. Đã lưu Solution vào Lịch Sử! ---"));
+            } else {
+                Platform.runLater(() -> log("--- BÀI LÀM CHƯA HOÀN THIỆN ---"));
+            }
         }).start();
     }
 

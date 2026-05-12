@@ -15,8 +15,7 @@ import okhttp3.Response;
 
 public class DeepSeekService {
 
-    // private static final String API_KEY = System.getenv("DEEPSEEK_API_KEY");
-    private static final String API_KEY = "sk-ca9212c89a0b4a7dba68060790972ddb";
+    private static final String API_KEY = System.getenv("DEEPSEEK_API_KEY");
     private static final String API_URL = "https://api.deepseek.com/chat/completions";
     private final OkHttpClient client;
     private final Gson gson;
@@ -195,6 +194,8 @@ public class DeepSeekService {
 
     public String generateSampleCode(String problemContent, String language) throws Exception {
         String systemPrompt = "You are a Grandmaster competitive programmer. Write an optimal " + language + " solution. " +
+                "IMPORTANT: ALWAYS read input from Standard Input (stdin/System.in) and write output to Standard Output (stdout/System.out). " +
+                "DO NOT read from or write to any files (e.g., STOCK.INP, .OUT) even if the problem statement explicitly asks for it. " +
                 "Output ONLY the code wrapped in ```" + language.toLowerCase() + "```. No explanations.";
 
         String response = callLLM(systemPrompt, "ĐỀ BÀI:\n" + problemContent);
