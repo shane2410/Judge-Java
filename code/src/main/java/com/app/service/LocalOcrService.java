@@ -7,8 +7,8 @@ import java.util.UUID;
 
 public class LocalOcrService {
     // Đường dẫn tuyệt đối tới thư mục VietOCR3 trong project
-    private static final String VIETOCR_DIR = "d:\\VScode\\java\\Judge\\VietOCR3";
-    private static final String VIETOCR_JAR = VIETOCR_DIR + "\\VietOCR.jar";
+    private static final String VIETOCR_DIR = "/home/dung/judge-java/VietOCR3";
+    private static final String VIETOCR_JAR = VIETOCR_DIR + "/VietOCR.jar";
 
     public String extractTextFromFile(File imageFile) throws Exception {
         if (!imageFile.exists()) {
@@ -37,6 +37,7 @@ public class LocalOcrService {
             );
             
             pb.directory(vietOcrDir);
+            pb.environment().put("TESSDATA_PREFIX", VIETOCR_DIR + "/");
             pb.redirectErrorStream(true);
             
             Process process = pb.start();

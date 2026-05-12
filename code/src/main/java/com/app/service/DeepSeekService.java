@@ -16,7 +16,7 @@ import okhttp3.Response;
 public class DeepSeekService {
 
     // private static final String API_KEY = System.getenv("DEEPSEEK_API_KEY");
-    private static final String API_KEY = "sk-c25d504ac84243c796319ca455e92b64";
+    private static final String API_KEY = "sk-ca9212c89a0b4a7dba68060790972ddb";
     private static final String API_URL = "https://api.deepseek.com/chat/completions";
     private final OkHttpClient client;
     private final Gson gson;
@@ -33,6 +33,10 @@ public class DeepSeekService {
     }
 
     private String callLLM(String systemPrompt, String userMessage) throws Exception {
+        return callLLM(systemPrompt, userMessage, -1);
+    }
+
+    private String callLLM(String systemPrompt, String userMessage, int maxTokens) throws Exception {
         if (API_KEY == null || API_KEY.isEmpty()) {
             throw new Exception("LỖI: Chưa thiết lập DEEPSEEK_API_KEY trong máy.");
         }
@@ -56,6 +60,9 @@ public class DeepSeekService {
 
         requestBodyJson.add("messages", messages);
         requestBodyJson.addProperty("temperature", 0.2);
+        if (maxTokens > 0) {
+            requestBodyJson.addProperty("max_tokens", maxTokens);
+        }
         requestBodyJson.addProperty("stream", false);
 
         RequestBody body = RequestBody.create(
@@ -151,21 +158,26 @@ public class DeepSeekService {
     }
 
     public String generateTestCases(String problemContent, int numberOfTestCases) throws Exception {
-        String systemPrompt = "Bạn là một Chuyên gia Sinh Testcase Đề thi Lập trình (ICPC/IOI). " +
-                "Nhiệm vụ của bạn là đọc đề bài, hiểu rõ Input/Output constraints, và sinh ra một danh sách " + numberOfTestCases + " testcases vững chắc.\n" +
-                "YÊU CẦU BẮT BUỘC:\n" +
-                "- Phải bao gồm các corner cases (MAX, MIN, giá trị 0, mảng rỗng nếu có thể).\n" +
-                "- KHÔNG giải thích lằng nhằng ngoài chuỗi JSON.\n" +
-                "- Định dạng trả về BẮT BUỘC là JSON Array of Objects: [ {\"input\": \"...\", \"expected_output\": \"...\", \"explanation\": \"...\"} ]\n" +
-                "Bao bọc JSON bằng ```json và ```";
+        String systemPrompt = "You are an ICPC/IOI testcase generator. Output ONLY a raw JSON array of " + numberOfTestCases + " objects. " +
+                "Each object must have exactly 2 keys: \"input\" and \"expected_output\". " +
+                "Include corner cases (min/max bounds, zero, empty, edge cases). " +
+                "Reply with ONLY the JSON array starting with [ and ending with ]. No markdown, no explanations.";
         
         String response = callLLM(systemPrompt, "ĐỀ BÀI:\n" + problemContent);
-        // Làm sạch response để lấy array JSON thuần
-        if (response.contains("```json")) {
-            response = response.substring(response.indexOf("```json") + 7);
-            if (response.contains("```")) {
-                response = response.substring(0, response.lastIndexOf("```"));
-            }
+        // Clean response
+        response = response.trim();
+        if (response.startsWith("```")) {
+            int start = response.indexOf("\n") + 1;
+            int end = response.lastIndexOf("```");
+            response = (end > start) ? response.substring(start, end).trim() : response.substring(start).trim();
+        }
+        // Fix truncated JSON: remove last incomplete entry
+        if (response.endsWith(",")) {
+            int lastBracket = response.lastIndexOf("}");
+            if (lastBracket > 0) response = response.substring(0, lastBracket + 1);
+        } else if (!response.endsWith("]")) {
+            int lastComplete = response.lastIndexOf("}");
+            if (lastComplete > 0) response = response.substring(0, lastComplete + 1) + "\n]";
         }
         return response.trim();
     }
@@ -182,10 +194,8 @@ public class DeepSeekService {
     }
 
     public String generateSampleCode(String problemContent, String language) throws Exception {
-        String systemPrompt = "Bạn là thí sinh thi ICPC mức độ Grandmaster. " +
-                "Hãy viết mã nguồn thuật toán để giải quyết đề bài sau. " +
-                "Ngôn ngữ: " + language + ". Yêu cầu tối ưu Complexity để qua được Time Limit. " +
-                "KHÔNG giải thích, CHỈ TRẢ VỀ MÃ NGUỒN được bọc trong ```" + language.toLowerCase() + " và ```";
+        String systemPrompt = "You are a Grandmaster competitive programmer. Write an optimal " + language + " solution. " +
+                "Output ONLY the code wrapped in ```" + language.toLowerCase() + "```. No explanations.";
 
         String response = callLLM(systemPrompt, "ĐỀ BÀI:\n" + problemContent);
         return extractCodeBlock(response, language.toLowerCase());

@@ -48,6 +48,33 @@ public class DatabaseConnection {
                     "strength_score INTEGER DEFAULT 0, " +
                     "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
                     "FOREIGN KEY(problem_id) REFERENCES Problem(id) ON DELETE CASCADE)");
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS CodeSubmission (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                    "problem_id INTEGER NOT NULL, " +
+                    "source_code TEXT NOT NULL, " +
+                    "language VARCHAR(50) NOT NULL, " +
+                    "expected_verdict VARCHAR(20) DEFAULT 'UNKNOWN', " +
+                    "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+                    "FOREIGN KEY(problem_id) REFERENCES Problem(id) ON DELETE CASCADE)");
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS EvaluationResult (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                    "submission_id INTEGER NOT NULL, " +
+                    "testcase_id INTEGER NOT NULL, " +
+                    "status VARCHAR(20) NOT NULL, " +
+                    "execution_time_ms INTEGER, " +
+                    "memory_used_kb INTEGER, " +
+                    "actual_output TEXT, " +
+                    "error_message TEXT, " +
+                    "evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+                    "FOREIGN KEY(submission_id) REFERENCES CodeSubmission(id) ON DELETE CASCADE, " +
+                    "FOREIGN KEY(testcase_id) REFERENCES TestCase(id) ON DELETE CASCADE)");
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_evaluation_submission ON EvaluationResult(submission_id)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_evaluation_testcase ON EvaluationResult(testcase_id)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_testcase_problem ON TestCase(problem_id)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_codesubmission_problem ON CodeSubmission(problem_id)");
                     
             // Enable Foreign keys for SQLite 
             stmt.execute("PRAGMA foreign_keys = ON;");

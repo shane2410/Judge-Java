@@ -28,6 +28,10 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
@@ -42,6 +46,7 @@ public class MainApp extends Application {
     private TableView<TestCase> testCaseTable;
     private TextArea codeArea;
     private ComboBox<String> langCombo;
+    private Spinner<Integer> testCaseCountSpinner;
     private TextArea consoleArea;
 
     // --- Kiến Trúc Hybrid AI ---
@@ -53,13 +58,19 @@ public class MainApp extends Application {
     private CodeSubmissionDAO codeSubmissionDAO;
     private EvaluationResultDAO evaluationResultDAO;
 
+    // --- History UI components ---
+    private TableView<Problem> historyProblemTable;
+    private TableView<TestCase> historyTestCaseTable;
+    private TableView<CodeSubmission> historySubmissionTable;
+    private TableView<EvaluationResult> historyResultTable;
+
     private Problem currentProblem;
 
     @Override
     public void start(Stage primaryStage) {
         // Init Services
-        ocrService = new LocalOcrService(); // Khởi tạo VietOCR3 Offline
-        aiService = new DeepSeekService();  // Khởi tạo DeepSeek (Logic)
+        ocrService = new LocalOcrService();
+        aiService = new DeepSeekService();
         executionService = new CodeExecutionService();
         problemDAO = new ProblemDAO();
         testCaseDAO = new TestCaseDAO();
@@ -68,6 +79,29 @@ public class MainApp extends Application {
 
         primaryStage.setTitle("JudgeAI - AI Assisted Programming Judge System");
 
+        TabPane tabPane = new TabPane();
+
+        // --- TAB 1: Judge (original layout) ---
+        Tab judgeTab = new Tab("Judge");
+        judgeTab.setClosable(false);
+        judgeTab.setContent(buildJudgePanel(primaryStage));
+
+        // --- TAB 2: History ---
+        Tab historyTab = new Tab("History");
+        historyTab.setClosable(false);
+        historyTab.setContent(buildHistoryPanel());
+        historyTab.setOnSelectionChanged(e -> {
+            if (historyTab.isSelected()) refreshHistoryData();
+        });
+
+        tabPane.getTabs().addAll(judgeTab, historyTab);
+
+        Scene scene = new Scene(tabPane, 1100, 700);
+        primaryStage.setScene(scene);
+        primaryStage.show();
+    }
+
+    private BorderPane buildJudgePanel(Stage primaryStage) {
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(10));
 
@@ -81,11 +115,19 @@ public class MainApp extends Application {
         Button btnUploadImg = new Button("📸 Upload Ảnh (OCR)");
         btnUploadImg.setOnAction(e -> handleUploadImage(primaryStage));
 
+        HBox tcCountBox = new HBox(10);
+        tcCountBox.getChildren().add(new Label("Số lượng testcase:"));
+        testCaseCountSpinner = new Spinner<>();
+        testCaseCountSpinner.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(1, 20, 8));
+        testCaseCountSpinner.setEditable(true);
+        testCaseCountSpinner.setPrefWidth(70);
+        tcCountBox.getChildren().add(testCaseCountSpinner);
+
         Button btnGenTest = new Button("🤖 Phân tích & Sinh Testcase");
         btnGenTest.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
         btnGenTest.setOnAction(e -> handleGenerateTestCases());
 
-        leftBox.getChildren().addAll(lblProblem, problemArea, btnUploadImg, btnGenTest);
+        leftBox.getChildren().addAll(lblProblem, problemArea, btnUploadImg, tcCountBox, btnGenTest);
         root.setLeft(leftBox);
 
         // 2. CENTER PANEL: Bảng TestCase
@@ -143,9 +185,182 @@ public class MainApp extends Application {
         bottomBox.getChildren().add(consoleArea);
         root.setBottom(bottomBox);
 
-        Scene scene = new Scene(root, 1100, 700);
-        primaryStage.setScene(scene);
-        primaryStage.show();
+        return root;
+    }
+
+    private BorderPane buildHistoryPanel() {
+        BorderPane root = new BorderPane();
+        root.setPadding(new Insets(10));
+
+        // --- Top toolbar ---
+        HBox toolbar = new HBox(10);
+        toolbar.setPadding(new Insets(0, 0, 10, 0));
+        Button btnRefresh = new Button("Refresh");
+        btnRefresh.setOnAction(e -> refreshHistoryData());
+        Button btnDeleteProblem = new Button("Delete Selected Problem");
+        btnDeleteProblem.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
+        btnDeleteProblem.setOnAction(e -> handleDeleteSelected());
+        toolbar.getChildren().addAll(btnRefresh, btnDeleteProblem);
+        root.setTop(toolbar);
+
+        // --- LEFT: Problems table ---
+        VBox leftBox = new VBox(10);
+        leftBox.setPrefWidth(350);
+        Label lblProblems = new Label("Problems:");
+        historyProblemTable = new TableView<>();
+
+        TableColumn<Problem, String> colPId = new TableColumn<>("ID");
+        colPId.setPrefWidth(40);
+        colPId.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().getId())));
+
+        TableColumn<Problem, String> colPTitle = new TableColumn<>("Title");
+        colPTitle.setPrefWidth(120);
+        colPTitle.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getTitle()));
+
+        TableColumn<Problem, String> colPDate = new TableColumn<>("Created");
+        colPDate.setPrefWidth(150);
+        colPDate.setCellValueFactory(data -> {
+            java.sql.Timestamp ts = data.getValue().getCreatedAt();
+            return new SimpleStringProperty(ts != null ? ts.toString() : "");
+        });
+
+        historyProblemTable.getColumns().addAll(colPId, colPTitle, colPDate);
+        historyProblemTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null) onProblemSelected(newVal);
+        });
+        leftBox.getChildren().addAll(lblProblems, historyProblemTable);
+        root.setLeft(leftBox);
+
+        // --- RIGHT: Detail area with tabs for TestCases, Submissions, Results ---
+        TabPane detailTabPane = new TabPane();
+
+        // TestCases tab
+        Tab tcTab = new Tab("Test Cases");
+        tcTab.setClosable(false);
+        historyTestCaseTable = new TableView<>();
+        TableColumn<TestCase, String> colTcId = new TableColumn<>("ID");
+        colTcId.setPrefWidth(40);
+        colTcId.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().getId())));
+        TableColumn<TestCase, String> colTcInput = new TableColumn<>("Input");
+        colTcInput.setPrefWidth(200);
+        colTcInput.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getInputData()));
+        TableColumn<TestCase, String> colTcOutput = new TableColumn<>("Expected Output");
+        colTcOutput.setPrefWidth(200);
+        colTcOutput.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getExpectedOutput()));
+        TableColumn<TestCase, String> colTcHidden = new TableColumn<>("Hidden");
+        colTcHidden.setPrefWidth(60);
+        colTcHidden.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().isHidden() ? "Yes" : "No"));
+        historyTestCaseTable.getColumns().addAll(colTcId, colTcInput, colTcOutput, colTcHidden);
+        tcTab.setContent(historyTestCaseTable);
+
+        // Submissions tab
+        Tab subTab = new Tab("Submissions");
+        subTab.setClosable(false);
+        historySubmissionTable = new TableView<>();
+        TableColumn<CodeSubmission, String> colSubId = new TableColumn<>("ID");
+        colSubId.setPrefWidth(40);
+        colSubId.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().getId())));
+        TableColumn<CodeSubmission, String> colSubLang = new TableColumn<>("Language");
+        colSubLang.setPrefWidth(80);
+        colSubLang.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getLanguage()));
+        TableColumn<CodeSubmission, String> colSubVerdict = new TableColumn<>("Expected Verdict");
+        colSubVerdict.setPrefWidth(100);
+        colSubVerdict.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getExpectedVerdict()));
+        TableColumn<CodeSubmission, String> colSubDate = new TableColumn<>("Created");
+        colSubDate.setPrefWidth(150);
+        colSubDate.setCellValueFactory(data -> {
+            java.sql.Timestamp ts = data.getValue().getCreatedAt();
+            return new SimpleStringProperty(ts != null ? ts.toString() : "");
+        });
+        historySubmissionTable.getColumns().addAll(colSubId, colSubLang, colSubVerdict, colSubDate);
+        historySubmissionTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null) onSubmissionSelected(newVal);
+        });
+        subTab.setContent(historySubmissionTable);
+
+        // Evaluation Results tab
+        Tab resTab = new Tab("Evaluation Results");
+        resTab.setClosable(false);
+        historyResultTable = new TableView<>();
+        TableColumn<EvaluationResult, String> colResId = new TableColumn<>("ID");
+        colResId.setPrefWidth(40);
+        colResId.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().getId())));
+        TableColumn<EvaluationResult, String> colResStatus = new TableColumn<>("Status");
+        colResStatus.setPrefWidth(70);
+        colResStatus.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getStatus()));
+        TableColumn<EvaluationResult, String> colResTime = new TableColumn<>("Time (ms)");
+        colResTime.setPrefWidth(80);
+        colResTime.setCellValueFactory(data -> {
+            Integer t = data.getValue().getExecutionTimeMs();
+            return new SimpleStringProperty(t != null ? t.toString() : "-");
+        });
+        TableColumn<EvaluationResult, String> colResTcId = new TableColumn<>("TC ID");
+        colResTcId.setPrefWidth(50);
+        colResTcId.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().getTestcaseId())));
+        TableColumn<EvaluationResult, String> colResOutput = new TableColumn<>("Actual Output");
+        colResOutput.setPrefWidth(200);
+        colResOutput.setCellValueFactory(data -> new SimpleStringProperty(
+                data.getValue().getActualOutput() != null ? data.getValue().getActualOutput() : ""));
+        TableColumn<EvaluationResult, String> colResError = new TableColumn<>("Error");
+        colResError.setPrefWidth(200);
+        colResError.setCellValueFactory(data -> new SimpleStringProperty(
+                data.getValue().getErrorMessage() != null ? data.getValue().getErrorMessage() : ""));
+        historyResultTable.getColumns().addAll(colResId, colResStatus, colResTime, colResTcId, colResOutput, colResError);
+        resTab.setContent(historyResultTable);
+
+        detailTabPane.getTabs().addAll(tcTab, subTab, resTab);
+        root.setCenter(detailTabPane);
+
+        return root;
+    }
+
+    private void refreshHistoryData() {
+        new Thread(() -> {
+            List<Problem> problems = problemDAO.getAllProblems();
+            Platform.runLater(() -> {
+                historyProblemTable.getItems().clear();
+                historyProblemTable.getItems().addAll(problems);
+                historyTestCaseTable.getItems().clear();
+                historySubmissionTable.getItems().clear();
+                historyResultTable.getItems().clear();
+                log("History refreshed: " + problems.size() + " problem(s) loaded.");
+            });
+        }).start();
+    }
+
+    private void onProblemSelected(Problem p) {
+        new Thread(() -> {
+            List<TestCase> tcs = testCaseDAO.getTestCasesByProblemId(p.getId());
+            List<CodeSubmission> subs = codeSubmissionDAO.getSubmissionsByProblemId(p.getId());
+            Platform.runLater(() -> {
+                historyTestCaseTable.getItems().clear();
+                historyTestCaseTable.getItems().addAll(tcs);
+                historySubmissionTable.getItems().clear();
+                historySubmissionTable.getItems().addAll(subs);
+                historyResultTable.getItems().clear();
+            });
+        }).start();
+    }
+
+    private void onSubmissionSelected(CodeSubmission sub) {
+        new Thread(() -> {
+            List<EvaluationResult> results = evaluationResultDAO.getResultsBySubmissionId(sub.getId());
+            Platform.runLater(() -> {
+                historyResultTable.getItems().clear();
+                historyResultTable.getItems().addAll(results);
+            });
+        }).start();
+    }
+
+    private void handleDeleteSelected() {
+        Problem selected = historyProblemTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            log("Please select a problem to delete.");
+            return;
+        }
+        problemDAO.deleteProblem(selected.getId());
+        log("Deleted problem ID=" + selected.getId());
+        refreshHistoryData();
     }
 
     private void handleGenerateTestCases() {
@@ -168,8 +383,10 @@ public class MainApp extends Application {
                 p.setId(pid);
                 currentProblem = p;
 
-                String jsonResponse = aiService.generateTestCases(probText, 3);
+                String jsonResponse = aiService.generateTestCases(probText, testCaseCountSpinner.getValue());
                 
+                Platform.runLater(() -> log("[DEBUG] Raw API response:\n" + jsonResponse.substring(0, Math.min(300, jsonResponse.length()))));
+
                 // Parse JSON array
                 JsonArray array = JsonParser.parseString(jsonResponse).getAsJsonArray();
                 List<TestCase> newTestCases = new ArrayList<>();
@@ -193,7 +410,7 @@ public class MainApp extends Application {
                 });
 
             } catch (Exception ex) {
-                Platform.runLater(() -> log("Lỗi cấu hình API/Parse JSON: Bạn cần thiết lập API Key thật vào AiService (Mặc định bị ngắt). \n" + ex.getMessage()));
+                Platform.runLater(() -> log("Lỗi API/Parse: " + ex.getMessage()));
             }
         }).start();
     }
@@ -277,15 +494,23 @@ public class MainApp extends Application {
                         return;
                     }
 
-                    Platform.runLater(() -> log("Đang dùng DeepSeek để sửa lỗi font và định dạng..."));
-                    
-                    // 2. Dùng DeepSeek để "mông má" lại văn bản cho đẹp
-                    String cleanText = aiService.refineOcrText(noisyText);
-
                     Platform.runLater(() -> {
-                        problemArea.setText(cleanText);
-                        log("Đã trích xuất và tinh chỉnh văn bản thành công!");
+                        problemArea.setText(noisyText);
+                        log("OCR thành công! Đang dùng AI để tinh chỉnh...");
                     });
+                    
+                    // 2. Dùng DeepSeek để làm sạch văn bản
+                    try {
+                        String cleanText = aiService.refineOcrText(noisyText);
+                        if (cleanText != null && !cleanText.trim().isEmpty()) {
+                            Platform.runLater(() -> {
+                                problemArea.setText(cleanText);
+                                log("Đã tinh chỉnh văn bản thành công!");
+                            });
+                        }
+                    } catch (Exception refineEx) {
+                        Platform.runLater(() -> log("Không thể tinh chỉnh (dùng bản thô): " + refineEx.getMessage()));
+                    }
                 } catch (Exception ex) {
                     Platform.runLater(() -> log("Lỗi OCR (VietOCR3): " + ex.getMessage()));
                 }
