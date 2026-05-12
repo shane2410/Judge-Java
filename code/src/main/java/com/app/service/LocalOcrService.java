@@ -1,14 +1,18 @@
 package com.app.service;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
-import java.util.Base64;
-import java.util.UUID;
 
 public class LocalOcrService {
-    // Đường dẫn tuyệt đối tới thư mục VietOCR3 trong project
-    private static final String VIETOCR_DIR = "d:\\VScode\\java\\Judge\\VietOCR3";
-    private static final String VIETOCR_JAR = VIETOCR_DIR + "\\VietOCR.jar";
+    private String getVietOcrDir() {
+        File dir1 = new File("VietOCR3");
+        if (dir1.exists() && dir1.isDirectory()) return dir1.getAbsolutePath();
+        File dir2 = new File("../VietOCR3");
+        if (dir2.exists() && dir2.isDirectory()) return dir2.getAbsolutePath();
+        return dir1.getAbsolutePath();
+    }
 
     public String extractTextFromFile(File imageFile) throws Exception {
         if (!imageFile.exists()) {
@@ -19,7 +23,8 @@ public class LocalOcrService {
         String tempInputName = "ocr_input_" + System.currentTimeMillis() + ".jpg";
         String tempOutputBase = "ocr_output_" + System.currentTimeMillis();
         
-        File vietOcrDir = new File(VIETOCR_DIR);
+        String vietOcrDirPath = getVietOcrDir();
+        File vietOcrDir = new File(vietOcrDirPath);
         File tempInputFile = new File(vietOcrDir, tempInputName);
         File expectedOutputFile = new File(vietOcrDir, tempOutputBase + ".txt");
 
@@ -35,10 +40,9 @@ public class LocalOcrService {
                 tempOutputBase, 
                 "-l", "vie"
             );
-            
             pb.directory(vietOcrDir);
+            pb.environment().put("TESSDATA_PREFIX", ".");
             pb.redirectErrorStream(true);
-            
             Process process = pb.start();
             
             // Đọc log output
@@ -70,11 +74,4 @@ public class LocalOcrService {
         }
     }
 
-    private void deleteFolder(File folder) {
-        File[] files = folder.listFiles();
-        if (files != null) {
-            for (File f : files) f.delete();
-        }
-        folder.delete();
-    }
 }

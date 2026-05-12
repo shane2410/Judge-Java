@@ -39,25 +39,33 @@ public class CodeExecutionService {
             String execCommand;
             
             // 1. Lưu file và Compile
+            boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
+            
             if (language.equalsIgnoreCase("JAVA")) {
-                // Ràng buộc thí sinh phải viết class Main, lưu vào Main.java
                 File sourceFile = new File(runDir, "Main.java");
                 Files.writeString(sourceFile.toPath(), sourceCode);
                 compiled = compileCode("javac Main.java", runDir, result);
+                
+                // Trên Linux/Mac, đôi khi cần dùng đường dẫn tuyệt đối cho java
                 execCommand = "java Main";
             } else if (language.equalsIgnoreCase("CPP")) {
                 File sourceFile = new File(runDir, "Solution.cpp");
                 Files.writeString(sourceFile.toPath(), sourceCode);
                 
-                // Lấy đường dẫn tuyệt đối của thư mục include để g++ tìm thấy stdbit.h
-                String includePath = new File("code/include").getAbsolutePath();
+                File stdbitFile = new File("include/stdbit.h");
+                if (stdbitFile.exists()) {
+                    Files.copy(stdbitFile.toPath(), new File(runDir, "stdbit.h").toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
                 
-                // Dùng gcc biên dịch với c++17 và include custom headers
-                compiled = compileCode("g++ -O2 Solution.cpp -o Solution -I" + includePath, runDir, result);
+                String outName = isWin ? "Solution.exe" : "Solution";
+                compiled = compileCode("g++ -O2 Solution.cpp -o " + outName, runDir, result);
                 
-                // Ở Windows thường là Solution.exe, Unix là Solution
-                String os = System.getProperty("os.name").toLowerCase();
-                execCommand = os.contains("win") ? "Solution.exe" : "./Solution";
+                // Trên Unix cần ./ để thực thi file trong thư mục hiện tại nếu không dùng path tuyệt đối
+                if (isWin) {
+                    execCommand = new File(runDir, outName).getAbsolutePath();
+                } else {
+                    execCommand = "./" + outName;
+                }
             } else {
                 result.setStatus("CE");
                 result.setErrorMessage("Unsupported Language");
